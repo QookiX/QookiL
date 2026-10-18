@@ -169,64 +169,22 @@ public sealed class ShareWebServer : IAsyncDisposable
             if (!ctx.Request.HasFormContentType)
                 return Results.BadRequest(new { message = "请使用表单方式上传" });
 
-            Directory.CreateDirectory(uploadDir);
-            var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
-
-            long total = 0;
-            var saved = new List<string>();
-            foreach (var file in form.Files)
+            // 任何异常都转成可读的 JSON 错误（而不是让 Kestrel 直接断开连接，
+            // 那样浏览器只会报「网络错误」，用户和排查都看不到原因）
+            try
             {
-                if (file.Length == 0) continue;
-                var target = UniquePath(Path.Combine(uploadDir, SanitizeFileName(file.FileName)));
-                var name = Path.GetFileName(target);
-                var ip = ClientIp(ctx);
-                var transferId = Guid.NewGuid();
-                var expected = file.Length;
-                long done = 0;
-                var lastReport = DateTime.UtcNow;
-                var lastDone = 0L;
-
-                ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, 0, false));
-                try
-                {
-                    await using var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 16, useAsync: true);
-                    await using var src = file.OpenReadStream();
-                    var buffer = new byte[81920];
-                    while (true)
-                    {
-                        var read = await src.ReadAsync(buffer.AsMemory(), ctx.RequestAborted);
-                        if (read <= 0) break;
-                        await fs.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
-                        done += read;
-                        if (DateTime.UtcNow - lastReport >= TimeSpan.FromMilliseconds(200) ||
-                            done == expected || done - lastDone >= 4 * 1024 * 1024)
-                        {
-                            lastReport = DateTime.UtcNow;
-                            lastDone = done;
-                            ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, done, false));
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    // 上传中断：保留已写入的部分文件，让用户决定去留
-                    throw;
-                }
-                finally
-                {
-                    ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, Math.Min(done, expected), true));
-                }
-
-                total += file.Length;
-                saved.Add(name);
-                System.Threading.Interlocked.Increment(ref _uploadsCount);
-                TransferLogged?.Invoke(new TransferLogEntry(DateTime.Now, ip, "上传", name, file.Length, target));
+                return await HandleUploadAsync(ctx, uploadDir);
             }
-
-            if (saved.Count == 0)
-                return Results.BadRequest(new { message = "没有收到有效文件" });
-
-            return Results.Json(new { ok = true, count = saved.Count, totalBytes = total, files = saved }, JsonOpts);
+            catch (OperationCanceledException)
+            {
+                DiagLog.Write("[upload] 客户端取消上传");
+                return Results.StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                DiagLog.Write("[upload] 上传失败：" + ex);
+                return Results.Json(new { message = "上传失败：" + ex.Message }, statusCode: 500);
+            }
         });
 
         _app = app;
@@ -305,6 +263,80 @@ public sealed class ShareWebServer : IAsyncDisposable
     {
         try { TransferProgressChanged?.Invoke(p); }
         catch { /* 进度回调失败不影响传输 */ }
+    }
+
+    /// <summary>处理上传：读表单、逐个落盘、上报进度。异常由调用方转成 JSON 错误。</summary>
+    private async Task<IResult> HandleUploadAsync(HttpContext ctx, string uploadDir)
+    {
+        Directory.CreateDirectory(uploadDir);
+        DiagLog.Write($"[upload] 收到上传：{ctx.Request.ContentLength?.ToString() ?? "?"} 字节，来自 {ClientIp(ctx)}");
+
+        IFormCollection form;
+        try
+        {
+            form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            DiagLog.Write($"[upload] 读取表单失败：{ex.GetType().Name} {ex.Message}");
+            throw;
+        }
+
+        long total = 0;
+        var saved = new List<string>();
+        foreach (var file in form.Files)
+        {
+            if (file.Length == 0) continue;
+            var target = UniquePath(Path.Combine(uploadDir, SanitizeFileName(file.FileName)));
+            var name = Path.GetFileName(target);
+            var ip = ClientIp(ctx);
+            var transferId = Guid.NewGuid();
+            var expected = file.Length;
+            long done = 0;
+            var lastReport = DateTime.UtcNow;
+            var lastDone = 0L;
+
+            ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, 0, false));
+            try
+            {
+                await using var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 16, useAsync: true);
+                await using var src = file.OpenReadStream();
+                var buffer = new byte[81920];
+                while (true)
+                {
+                    var read = await src.ReadAsync(buffer.AsMemory(), ctx.RequestAborted);
+                    if (read <= 0) break;
+                    await fs.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
+                    done += read;
+                    if (DateTime.UtcNow - lastReport >= TimeSpan.FromMilliseconds(200) ||
+                        done == expected || done - lastDone >= 4 * 1024 * 1024)
+                    {
+                        lastReport = DateTime.UtcNow;
+                        lastDone = done;
+                        ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, done, false));
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                DiagLog.Write($"[upload] 保存文件失败（{name}）：{ex.GetType().Name} {ex.Message}");
+                throw;
+            }
+            finally
+            {
+                ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, Math.Min(done, expected), true));
+            }
+
+            total += file.Length;
+            saved.Add(name);
+            System.Threading.Interlocked.Increment(ref _uploadsCount);
+            TransferLogged?.Invoke(new TransferLogEntry(DateTime.Now, ip, "上传", name, file.Length, target));
+        }
+
+        if (saved.Count == 0)
+            return Results.BadRequest(new { message = "没有收到有效文件" });
+
+        return Results.Json(new { ok = true, count = saved.Count, totalBytes = total, files = saved }, JsonOpts);
     }
 
     /// <summary>

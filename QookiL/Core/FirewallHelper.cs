@@ -163,7 +163,7 @@ public static class FirewallHelper
                 ?? throw new InvalidOperationException("无法访问 Windows 防火墙（HNetCfg.FwPolicy2）");
 
             // 1. 收集并删除指向本程序的所有旧规则
-            foreach (var name in CollectRuleNames(policy, exePath).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var name in CollectRuleNames((IEnumerable)policy.Rules, exePath).Distinct(StringComparer.OrdinalIgnoreCase))
                 policy.Rules.Remove(name);
 
             // 2. 添加放行规则：仅本程序、仅入站、所有网络类型、TCP
@@ -190,10 +190,15 @@ public static class FirewallHelper
         }
     }
 
-    private static List<string> CollectRuleNames(dynamic policy, string exePath)
+    /// <summary>
+    /// 收集指向指定程序的全部规则名。
+    /// 注意：参数必须是静态类型 IEnumerable —— 若接收 dynamic，调用点会整体变成动态绑定，
+    /// 后面的 .Distinct(...) 会因动态绑定找不到 LINQ 扩展方法而在运行时报错。
+    /// </summary>
+    private static List<string> CollectRuleNames(IEnumerable rules, string exePath)
     {
         var names = new List<string>();
-        foreach (var raw in (IEnumerable)policy.Rules)
+        foreach (var raw in rules)
         {
             dynamic rule = raw;
             try
@@ -216,7 +221,7 @@ public static class FirewallHelper
         {
             var policy = CreatePolicy()
                 ?? throw new InvalidOperationException("无法访问 Windows 防火墙（HNetCfg.FwPolicy2）");
-            foreach (var name in CollectRuleNames(policy, exePath).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var name in CollectRuleNames((IEnumerable)policy.Rules, exePath).Distinct(StringComparer.OrdinalIgnoreCase))
                 policy.Rules.Remove(name);
             DiagLog.Write("[fw] 已撤销本程序的放行规则");
             return 0;

@@ -606,7 +606,7 @@ function downloadFile(id, path, name, sizeText) {
       location.href = dlUrl(id, path); // 该环境不支持 blob 保存时回退原生下载
     }
   };
-  xhr.onerror = () => { dlBusy = false; panel.hidden = true; toast("下载失败"); };
+  xhr.onerror = () => { dlBusy = false; panel.hidden = true; toast("下载失败：连接中断，请检查电脑端服务是否仍在运行"); };
   xhr.send();
 }
 
@@ -699,7 +699,10 @@ function upload(files) {
       toast((j && j.message) || "发送失败");
     }
   };
-  xhr.onerror = () => { $("#prog").hidden = true; toast("网络错误，发送失败"); };
+  xhr.onerror = () => {
+    $("#prog").hidden = true;
+    toast("网络错误，发送失败：请确认手机与电脑在同一 Wi‑Fi、电脑端服务运行中且防火墙已放行");
+  };
   $("#prog").hidden = false;
   $("#ptext").textContent = "正在发送…";
   xhr.send(fd);
