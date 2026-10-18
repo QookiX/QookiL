@@ -4,7 +4,7 @@
 ; 本地没有该文件时自动回退英文（保证脚本在任何环境都能编译通过）。
 
 #define MyAppName "QookiL"
-#define MyAppVersion GetVersionNumbersString("publish\QookiL.exe")
+#define MyAppVersion GetVersionNumbersString("..\\publish\\QookiL.exe")
 #define MyAppPublisher "weimosheng"
 #define MyAppURL "https://github.com/weimosheng/QookiL"
 #define MyAppExeName "QookiL.exe"
@@ -19,7 +19,8 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
-OutputDir=installer
+; 相对 .iss 所在目录；CI 里输出到仓库根的 installer\ 下
+OutputDir=.
 OutputBaseFilename=QookiL-Setup-x64
 Compression=lzma2/max
 SolidCompression=yes
@@ -48,7 +49,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"
 Name: "autostart"; Description: "{cm:AutoStartProgram}"; Flags: unchecked
 
 [Files]
-Source: "publish\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "..\publish\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

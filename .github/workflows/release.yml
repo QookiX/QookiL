@@ -59,7 +59,7 @@ jobs:
 
       - name: 编译安装器（Inno Setup）
         shell: pwsh
-        run: ISCC.exe installer\QookiL.iss
+        run: ISCC.exe "installer\QookiL.iss"
 
       - name: 打包绿色版 zip
         shell: pwsh
