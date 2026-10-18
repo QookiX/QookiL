@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    开发用冒烟测试：不启动 WinUI 界面，直接复用 QookiL 的 Core / Web 源码
+    起一个网页服务器并对所有 HTTP 接口做自动化校验。
+    运行：dotnet run（在 tools/ServerSmoke 目录下，参数为端口，默认 5189）
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ServerSmoke</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\QookiL\Core\**\*.cs" LinkBase="Core" />
+    <Compile Include="..\..\QookiL\Web\**\*.cs" LinkBase="Web" />
+    <EmbeddedResource Include="..\..\QookiL\Web\index.html" />
+  </ItemGroup>
+
+</Project>
