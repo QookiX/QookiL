@@ -208,6 +208,19 @@ await Check("防火墙状态检查（三态读取，含诊断信息）", async (
     return !string.IsNullOrWhiteSpace(info.Details);
 });
 
+await Check("防火墙撤销 / 动态放行看门狗（辅助路径）", async () =>
+{
+    var self = Environment.ProcessPath!;
+    // 非管理员环境下撤销返回 1（拒绝访问）、管理员环境删除后返回 0——两种都属正常
+    var rm = await Task.Run(() => FirewallHelper.RemoveRules(self));
+    Console.WriteLine($"      RemoveRules -> {rm}");
+    // 父进程不存在 → 加规则（成功与否随权限）后立即走撤销分支
+    var flag = Path.Combine(Path.GetTempPath(), "qookil-nonexistent.flag");
+    var wd = await Task.Run(() => FirewallHelper.RunWatchdog(self, int.MaxValue - 1, flag));
+    Console.WriteLine($"      RunWatchdog -> {wd}");
+    return true;
+});
+
 await Check("传输记录含完整路径（供「打开所在文件夹」）", () =>
 {
     var uploadPath = Path.Combine(uploadDir, "手机上传 测试.txt");

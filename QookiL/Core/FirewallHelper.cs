@@ -21,6 +21,10 @@ public static class FirewallHelper
 {
     /// <summary>提权辅助模式的命令行参数。</summary>
     public const string SetupArg = "--firewall-setup";
+    /// <summary>动态放行看门狗模式：加规则 → 监视主程序 → 退出时撤销。</summary>
+    public const string WatchArg = "--firewall-watch";
+    /// <summary>删除本程序全部防火墙规则（提权执行）。</summary>
+    public const string RemoveArg = "--firewall-remove";
 
     // NET_FW_PROFILE_TYPE2 位掩码
     private const int ProfileDomain = 0x1;
@@ -147,8 +151,7 @@ public static class FirewallHelper
         catch { return false; }
     }
 
-    /// <summary>
-    /// 提权辅助模式里执行：删除本程序的全部旧规则（可能包含此前误点「取消」产生的
+    /// <summary>提权辅助模式里执行：删除本程序的全部旧规则（可能包含此前误点「取消」产生的
     /// 阻止规则——它的优先级高于放行规则，不清掉的话加了放行也没用），再添加一条
     /// 仅作用于本程序的入站放行规则。返回 0 表示规则写入成功；是否真的放行由主实例复核。
     /// </summary>
@@ -160,21 +163,7 @@ public static class FirewallHelper
                 ?? throw new InvalidOperationException("无法访问 Windows 防火墙（HNetCfg.FwPolicy2）");
 
             // 1. 收集并删除指向本程序的所有旧规则
-            var staleNames = new List<string>();
-            foreach (var raw in (IEnumerable)policy.Rules)
-            {
-                dynamic rule = raw;
-                try
-                {
-                    var app = (string?)rule.ApplicationName;
-                    if (string.IsNullOrEmpty(app)) continue;
-                    if (!string.Equals(app, exePath, StringComparison.OrdinalIgnoreCase)) continue;
-                    var name = (string?)rule.Name;
-                    if (!string.IsNullOrEmpty(name)) staleNames.Add(name);
-                }
-                catch { /* 跳过不可读的规则 */ }
-            }
-            foreach (var name in staleNames.Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var name in CollectRuleNames(policy, exePath).Distinct(StringComparer.OrdinalIgnoreCase))
                 policy.Rules.Remove(name);
 
             // 2. 添加放行规则：仅本程序、仅入站、所有网络类型、TCP
@@ -199,5 +188,84 @@ public static class FirewallHelper
             DiagLog.Write("[fw] 辅助进程失败：" + ex.Message);
             return 1;
         }
+    }
+
+    private static List<string> CollectRuleNames(dynamic policy, string exePath)
+    {
+        var names = new List<string>();
+        foreach (var raw in (IEnumerable)policy.Rules)
+        {
+            dynamic rule = raw;
+            try
+            {
+                var app = (string?)rule.ApplicationName;
+                if (string.IsNullOrEmpty(app)) continue;
+                if (!string.Equals(app, exePath, StringComparison.OrdinalIgnoreCase)) continue;
+                var name = (string?)rule.Name;
+                if (!string.IsNullOrEmpty(name)) names.Add(name);
+            }
+            catch { /* 跳过不可读的规则 */ }
+        }
+        return names;
+    }
+
+    /// <summary>删除本程序的全部防火墙规则。返回 0 成功；1 失败（通常是无管理员权限）。</summary>
+    public static int RemoveRules(string exePath)
+    {
+        try
+        {
+            var policy = CreatePolicy()
+                ?? throw new InvalidOperationException("无法访问 Windows 防火墙（HNetCfg.FwPolicy2）");
+            foreach (var name in CollectRuleNames(policy, exePath).Distinct(StringComparer.OrdinalIgnoreCase))
+                policy.Rules.Remove(name);
+            DiagLog.Write("[fw] 已撤销本程序的放行规则");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            DiagLog.Write("[fw] 撤销规则失败：" + ex.Message);
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// 动态放行看门狗（以管理员身份运行）：添加放行规则，然后监视主程序与
+    /// 「服务运行」标志文件；主程序退出 / 停止服务 / 进程崩溃时删除规则并退出。
+    /// 这样放行规则只在服务运行期间存在。
+    /// 参数：parentPid=主程序进程号，flagFile=服务运行标志文件。
+    /// </summary>
+    public static int RunWatchdog(string exePath, int parentPid, string flagFile)
+    {
+        DiagLog.Write($"[fw] 看门狗启动（主进程 {parentPid}）");
+        var add = ApplyRules(exePath);
+        if (add != 0)
+        {
+            DiagLog.Write("[fw] 看门狗：放行规则添加失败，退出");
+            return add;
+        }
+
+        Process? parent = null;
+        try { parent = Process.GetProcessById(parentPid); } catch { /* 主进程已不在：只认标志文件 */ }
+
+        try
+        {
+            // 最长看守 12 小时，避免任何异常情况下无限驻留
+            var deadline = DateTime.UtcNow.AddHours(12);
+            while (DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(1000);
+                var parentAlive = parent is null || !parent.HasExited; // 拿不到句柄时只认标志
+                var flagAlive = File.Exists(flagFile);
+                if (!parentAlive || !flagAlive) break;
+            }
+        }
+        catch (Exception ex)
+        {
+            DiagLog.Write("[fw] 看门狗监视异常：" + ex.Message);
+        }
+
+        var rm = RemoveRules(exePath);
+        DiagLog.Write($"[fw] 看门狗退出，规则撤销结果 {rm}");
+        return rm;
     }
 }

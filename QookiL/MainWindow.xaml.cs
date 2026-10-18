@@ -35,6 +35,8 @@ public sealed partial class MainWindow : Window
     private AppSettings _settings = new();
     private FrameworkElement? _root;
     private bool _fwPromptShown;
+    private Process? _fwWatchdog;
+    private string _fwFlag = "";
 
     public MainWindow()
     {
@@ -76,14 +78,16 @@ public sealed partial class MainWindow : Window
         }
         UpdateEmptyHint();
         AutoStartToggle.IsOn = _settings.AutoStart;
+        StrictFirewallToggle.IsOn = _settings.StrictFirewall;
 
         if (Content is FrameworkElement root)
         {
             _root = root;
             root.Loaded += async (_, _) =>
             {
-                // 程序启动时就确认防火墙放行（未放行/读不到状态都会弹窗引导，绝不静默跳过）
-                await EnsureFirewallAsync();
+                // 启动时确认防火墙放行（未放行/读不到状态都会弹窗引导，绝不静默跳过）。
+                // 动态放行模式下规则本就只在服务运行期间存在，启动时不检查、由启动服务时统一处理。
+                if (!_settings.StrictFirewall) await EnsureFirewallAsync();
                 if (AutoStartToggle.IsOn && _server is null) await StartServerAsync();
             };
         }
@@ -121,8 +125,16 @@ public sealed partial class MainWindow : Window
                 usedFallback = true;
             }
 
-            // 先确认防火墙放行，否则局域网设备根本连不上（未放行会弹窗引导）
-            var fwOk = await EnsureFirewallAsync();
+            // 先确认防火墙放行，否则局域网设备根本连不上
+            // 动态放行模式：提权看门狗加规则并监视，服务停止/程序退出时自动撤销
+            var exe = Environment.ProcessPath;
+            var fwOk = true;
+            if (!string.IsNullOrEmpty(exe))
+            {
+                fwOk = _settings.StrictFirewall
+                    ? await StartFirewallWatchdogAsync(exe)
+                    : await EnsureFirewallAsync();
+            }
 
             var server = ShareWebServer.Start(port, _store, uploadDir, NetworkHelper.HostName);
             server.TransferLogged += OnTransferLogged;
@@ -145,6 +157,9 @@ public sealed partial class MainWindow : Window
             if (fwOk)
                 ShowInfo(InfoBarSeverity.Success,
                     $"服务已启动。手机等设备连接同一 Wi‑Fi，扫码或输入地址即可访问。{note}");
+            else if (_settings.StrictFirewall)
+                ShowInfo(InfoBarSeverity.Warning,
+                    $"服务已启动，但动态放行未完成（管理员确认被取消或规则添加失败）：其他设备可能无法连接。停止后重新启动服务可重试。{note}");
             else
                 ShowInfo(InfoBarSeverity.Warning,
                     $"服务已启动，但未通过防火墙放行：其他设备可能无法连接。点右上「⚙ 连接诊断」可查看原因和处理办法。{note}");
@@ -196,6 +211,48 @@ public sealed partial class MainWindow : Window
         return !after.NeedsSetup;
     }
 
+    /// <summary>
+    /// 动态放行：以管理员身份启动看门狗（加规则 → 监视 → 停止/退出时撤销规则），
+    /// 使放行只存在于服务运行期间。每次启动服务需一次 UAC，这是严格模式的代价。
+    /// </summary>
+    private async Task<bool> StartFirewallWatchdogAsync(string exe)
+    {
+        try
+        {
+            _fwFlag = Path.Combine(Path.GetTempPath(), $"qookil-fw-{Environment.ProcessId}.flag");
+            await File.WriteAllTextAsync(_fwFlag, "run");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = $"{FirewallHelper.WatchArg} {Environment.ProcessId} \"{_fwFlag}\"",
+                Verb = "runas",
+                UseShellExecute = true,
+            };
+            _fwWatchdog = Process.Start(psi);
+            DiagLog.Write("[fw] 看门狗已启动，等待规则生效");
+
+            // 等提权进程把规则加好（轮询复核，最多 15 秒）
+            for (var i = 0; i < 30; i++)
+            {
+                await Task.Delay(500);
+                var info = await Task.Run(() => FirewallHelper.Check(exe));
+                if (!info.NeedsSetup) return true;
+                if (_fwWatchdog is { HasExited: true }) break;
+            }
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception)   // UAC 被取消
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            DiagLog.Write("[fw] 看门狗启动失败：" + ex.Message);
+            return false;
+        }
+    }
+
     /// <summary>连接诊断：防火墙状态 / 本程序规则 / 本机地址 / 排查清单。</summary>
     private async void OnDiagnostics(object sender, RoutedEventArgs e)
     {
@@ -206,6 +263,9 @@ public sealed partial class MainWindow : Window
         DiagLog.Write($"[diag] {fw.Verdict}；{fw.Details}");
 
         var sb = new System.Text.StringBuilder();
+        sb.Append("放行模式：").AppendLine(_settings.StrictFirewall
+            ? "动态放行（规则仅在服务运行期间存在，停止或退出程序时自动撤销）"
+            : "一次性持久规则（Windows 标准做法；程序退出后端口无监听，外部无法访问）");
         sb.Append("防火墙：").AppendLine(fw.Details);
         sb.AppendLine();
         sb.AppendLine("本机地址（扫码优先使用排在前面的物理网卡）：");
@@ -258,6 +318,9 @@ public sealed partial class MainWindow : Window
         }
         catch { /* 忽略停止异常 */ }
 
+        // 动态放行：删标志让看门狗撤销规则，并等它退出（避免紧接着重启时规则竞争）
+        await StopFirewallWatchdogAsync();
+
         StartStopText.Text = "启动服务";
         StartStopIcon.Glyph = "\uE768";
         StatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.Gray);
@@ -270,12 +333,33 @@ public sealed partial class MainWindow : Window
         UrlPanel.Children.Clear();
     }
 
+    /// <summary>通知看门狗撤销放行规则并等它退出（最多 4 秒）。</summary>
+    private async Task StopFirewallWatchdogAsync()
+    {
+        try { if (_fwFlag.Length > 0) File.Delete(_fwFlag); } catch { }
+        if (_fwWatchdog is { } wd && !wd.HasExited)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                await wd.WaitForExitAsync(cts.Token);
+            }
+            catch { /* 超时也继续：看门狗仍会在主进程退出后自行撤销 */ }
+        }
+        _fwWatchdog = null;
+        _fwFlag = "";
+    }
+
     private void OnShutdown()
     {
         try { Persist(); } catch { }
         var server = _server;
         _server = null;
         try { server?.DisposeAsync().AsTask().Wait(2000); } catch { }
+
+        // 动态放行：通知看门狗撤销规则（主进程随即退出，看门狗也会自行检测到）
+        try { if (_fwFlag.Length > 0) File.Delete(_fwFlag); } catch { }
+        try { _fwWatchdog?.WaitForExit(1500); } catch { }
     }
 
     /* ================= 地址与二维码 ================= */
@@ -569,6 +653,8 @@ public sealed partial class MainWindow : Window
 
     private void OnAutoStartToggled(object sender, RoutedEventArgs e) => Persist();
 
+    private void OnStrictFirewallToggled(object sender, RoutedEventArgs e) => Persist();
+
     private void Persist()
     {
         _settings.Port = (int)Math.Clamp(PortBox.Value, 1, 65535);
@@ -579,6 +665,7 @@ public sealed partial class MainWindow : Window
             ? ""
             : upload;
         _settings.AutoStart = AutoStartToggle.IsOn;
+        _settings.StrictFirewall = StrictFirewallToggle.IsOn;
         _settings.SharedPaths = _shares.Select(v => v.Item.FullPath).ToList();
         SettingsStore.Save(_settings);
     }

@@ -52,13 +52,24 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // 防火墙辅助模式：主实例以管理员身份启动本程序（--firewall-setup），
-        // 这里不建窗口，设置完防火墙规则后直接退出。
+        // 防火墙辅助模式（均不建窗口，处理完直接退出）：
+        //   --firewall-setup   一次性持久放行（默认模式，主实例首次授权）
+        //   --firewall-watch   动态放行看门狗：加规则 → 监视 → 退出时撤销
+        //   --firewall-remove  只删除本程序的放行规则
         var cmdline = Environment.GetCommandLineArgs();
+        var exe = Environment.ProcessPath ?? cmdline[0];
+
         if (cmdline.Contains(FirewallHelper.SetupArg, StringComparer.Ordinal))
-        {
-            var exe = Environment.ProcessPath ?? cmdline[0];
             Environment.Exit(FirewallHelper.ApplyRules(exe));
+
+        if (cmdline.Contains(FirewallHelper.RemoveArg, StringComparer.Ordinal))
+            Environment.Exit(FirewallHelper.RemoveRules(exe));
+
+        var watchIdx = Array.IndexOf(cmdline, FirewallHelper.WatchArg);
+        if (watchIdx >= 0 && watchIdx + 2 < cmdline.Length)
+        {
+            var pid = int.TryParse(cmdline[watchIdx + 1], out var p) ? p : -1;
+            Environment.Exit(FirewallHelper.RunWatchdog(exe, pid, cmdline[watchIdx + 2]));
         }
 
         MainWin = new MainWindow();

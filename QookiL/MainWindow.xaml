@@ -78,11 +78,20 @@
                                    Width="124" SpinButtonPlacementMode="Compact"/>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="2" Spacing="1" VerticalAlignment="Center">
-                        <TextBlock Text="启动时自动开启" FontSize="11"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        <ToggleSwitch x:Name="AutoStartToggle" OnContent="" OffContent="" MinWidth="44"
-                                      Toggled="OnAutoStartToggled"/>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                        <StackPanel Spacing="1">
+                            <TextBlock Text="启动时自动开启" FontSize="11"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <ToggleSwitch x:Name="AutoStartToggle" OnContent="" OffContent="" MinWidth="44"
+                                          Toggled="OnAutoStartToggled"/>
+                        </StackPanel>
+                        <StackPanel Spacing="1">
+                            <TextBlock Text="退出即撤销放行" FontSize="11"
+                                       ToolTipService.ToolTip="严格模式：放行规则只在服务运行期间存在，停止服务或退出程序时自动删除。代价：每次启动服务都会弹一次管理员确认（UAC）。关闭时（默认）：一次性持久规则——程序退出后端口没有监听，外部同样无法访问。"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <ToggleSwitch x:Name="StrictFirewallToggle" OnContent="" OffContent="" MinWidth="44"
+                                          Toggled="OnStrictFirewallToggled"/>
+                        </StackPanel>
                     </StackPanel>
 
                     <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">

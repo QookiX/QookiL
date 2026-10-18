@@ -8,6 +8,8 @@ public sealed class AppSettings
     public int Port { get; set; } = 5188;
     public string UploadDir { get; set; } = "";
     public bool AutoStart { get; set; }
+    /// <summary>动态放行：放行规则只在服务运行期间存在，退出自动撤销。</summary>
+    public bool StrictFirewall { get; set; }
     public List<string> SharedPaths { get; set; } = new();
 }
 
