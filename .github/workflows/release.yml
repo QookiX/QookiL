@@ -26,6 +26,14 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+          Add-Content $env:GITHUB_PATH ($iscc | Split-Path)
+
       # 与 ci.yml 相同：本地 NuGet.config 指向国内镜像，CI 运行器换回官方源
       - name: 使用 nuget.org 官方源
         shell: pwsh
@@ -49,7 +57,11 @@ jobs:
       - name: 发布自包含绿色版（win-x64）
         run: dotnet publish QookiL/QookiL.csproj -c Release -r win-x64 -p:Platform=x64 --self-contained true --nologo -o publish
 
-      - name: 打包 zip
+      - name: 编译安装器（Inno Setup）
+        shell: pwsh
+        run: ISCC.exe installer\QookiL.iss
+
+      - name: 打包绿色版 zip
         shell: pwsh
         run: Compress-Archive -Path publish/* -DestinationPath "QookiL-win-x64.zip" -CompressionLevel Optimal
 
@@ -60,6 +72,7 @@ jobs:
         run: |
           gh release create ${{ github.ref_name }} `
             "QookiL-win-x64.zip" `
+            "installer/QookiL-Setup-x64.exe" `
             --title "QookiL ${{ github.ref_name }}" `
             --generate-notes `
-            --notes "自包含绿色版（win-x64），目标机器无需安装任何运行时，解压后运行 QookiL.exe 即可。"
+            --notes "两种安装方式任选：`n`n- **QookiL-Setup-x64.exe** — 安装器：双击一路下一步，自动建开始菜单/桌面快捷方式（可选开机自启），卸载时清理防火墙规则`n- **QookiL-win-x64.zip** — 绿色版：解压后运行 QookiL.exe 即可，不写注册表`n`n自包含发布，目标机器无需安装任何运行时。"

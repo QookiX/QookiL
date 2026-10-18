@@ -129,7 +129,7 @@ dotnet run --project tools/ServerSmoke -c Release -- 5199 hold   # 挂起服务�
 ## CI 自动构建与发布
 
 - **推送 `main` / PR**：[GitHub Actions](.github/workflows/ci.yml) 自动执行 还原 → Release x64 编译 → 17 项冒烟测试 → 自包含发布 → 构建产物上传为 Artifact（保留 14 天，Actions 页面下载）；也支持手动触发
-- **推送 `v*` 标签**（如 `git tag v1.0.0 && git push origin v1.0.0`）：[release.yml](.github/workflows/release.yml) 自动构建 → 冒烟测试 → 打包 zip → **创建 GitHub Release** 并附上绿色版压缩包，在仓库 Releases 页面直接下载
+- **推送 `v*` 标签**（如 `git tag v1.0.0 && git push origin v1.0.0`）：[release.yml](.github/workflows/release.yml) 自动构建 → 冒烟测试 → 同时产出**安装器 exe（Inno Setup，中文向导、开始菜单/桌面快捷方式、可选开机自启、卸载自动清理防火墙规则）**和**绿色版 zip** → 创建 GitHub Release 并附上两个文件，在仓库 Releases 页面直接下载
 
 注意：CI 会把 `NuGet.config` 临时替换为 nuget.org 官方源（本地保留国内镜像配置，互不影响）。
 
