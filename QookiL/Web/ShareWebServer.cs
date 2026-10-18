@@ -51,6 +51,9 @@ public sealed class ShareWebServer : IAsyncDisposable
 
     private void StartInternal(SharedStore store, string uploadDir, string hostName)
     {
+        // 上传时 ASP.NET Core 会把请求体缓冲到临时文件；先确保 TMP/TEMP 指向真正可写的目录
+        WritablePaths.RedirectProcessTemp();
+
         var builder = WebApplication.CreateBuilder(Array.Empty<string>());
         builder.Environment.ContentRootPath = AppContext.BaseDirectory;
         builder.WebHost.UseKestrel(options =>
@@ -63,6 +66,7 @@ public sealed class ShareWebServer : IAsyncDisposable
         {
             o.MultipartBodyLengthLimit = 8L * 1024 * 1024 * 1024; // 8GB
             o.MultipartHeadersLengthLimit = 32 * 1024;
+            o.MemoryBufferThreshold = 1024 * 1024;                // 1MB 以内留在内存，少用临时文件
         });
 
         var app = builder.Build();

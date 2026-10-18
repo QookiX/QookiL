@@ -16,6 +16,10 @@ public partial class App : Application
 
     public App()
     {
+        // 必须在任何可能与临时目录打交道的代码之前：探测可写目录并重定向 TMP/TEMP，
+        // 否则在受限环境（沙箱/受限终端）下上传会因临时文件写入被拒而失败。
+        WritablePaths.RedirectProcessTemp();
+
         InitializeComponent();
 
         UnhandledException += (_, e) =>

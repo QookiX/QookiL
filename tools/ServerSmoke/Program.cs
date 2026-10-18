@@ -187,12 +187,38 @@ await Check("上传的文件出现在接收目录列表", async () =>
         .Any(e => e.GetProperty("name").GetString() == "手机上传 测试.txt");
 });
 
+// 超过 FormOptions.MemoryBufferThreshold（1MB）会强制 ASP.NET Core 走临时文件缓冲，
+// 正是「Access to the path …\Temp\… is denied」出问题的那条路径
+await Check("大文件上传（走临时文件缓冲）", async () =>
+{
+    var payload = new byte[3 * 1024 * 1024];
+    new Random(7).NextBytes(payload);
+    using var form = new MultipartFormDataContent();
+    var content = new ByteArrayContent(payload);
+    content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+    form.Add(content, "files", "大文件 上传.bin");
+
+    var res = await http.PostAsync("/upload", form);
+    var body = await res.Content.ReadAsStringAsync();
+    if (!res.IsSuccessStatusCode)
+    {
+        Console.WriteLine("      " + body);
+        return false;
+    }
+    var savedTo = Path.Combine(uploadDir, "大文件 上传.bin");
+    var ok = File.Exists(savedTo) && new FileInfo(savedTo).Length == payload.Length;
+    Console.WriteLine($"      tempDir={WritablePaths.TempDir}");
+    File.Delete(savedTo);
+    return ok;
+});
+
 await Check("实时刷新：rev / uploads 计数", async () =>
 {
     var j1 = await http.GetFromJsonAsync<JsonElement>("/api/info");
     var rev1 = j1.GetProperty("rev").GetInt32();
     var up1 = j1.GetProperty("uploads").GetInt32();
-    if (rev1 < 1 || up1 != 1) return false;
+    // 之前已上传两个文件（小文件 + 3MB 大文件），计数应至少为 2
+    if (rev1 < 1 || up1 < 2) return false;
 
     // 模拟电脑端又添加 / 移除共享，版本号必须变化（网页端轮询就靠它刷新）
     var extra = SharedItem.FromPath(Path.Combine(shareDir, "项目笔记.md"))!;

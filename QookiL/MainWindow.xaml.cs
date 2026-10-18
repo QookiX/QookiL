@@ -269,6 +269,7 @@ public sealed partial class MainWindow : Window
         sb.Append("放行模式：").AppendLine(_settings.StrictFirewall
             ? "动态放行（规则仅在服务运行期间存在，停止或退出程序时自动撤销）"
             : "一次性持久规则（Windows 标准做法；程序退出后端口无监听，外部无法访问）");
+        sb.Append("临时目录：").AppendLine(WritablePaths.TempDir);
         sb.Append("防火墙：").AppendLine(fw.Details);
         sb.AppendLine();
         sb.AppendLine("本机地址（扫码优先使用排在前面的物理网卡）：");

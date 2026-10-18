@@ -1,13 +1,15 @@
 namespace QookiL.Core;
 
 /// <summary>
-/// 轻量诊断日志：%TEMP%\qookil-diag.log。
-/// 记录防火墙检查结论、服务启停等关键事件，排查「其他设备连不上」时可直接查看。
+/// 轻量诊断日志，写入可写临时目录下的 qookil-diag.log
+/// （正常情况下是 %TEMP%，受限环境下自动回退到用户目录/程序目录）。
+/// 记录防火墙检查、服务启停、上传失败等关键事件，排查「其他设备连不上」时可直接查看。
 /// </summary>
 public static class DiagLog
 {
-    private static readonly string LogPath =
-        Path.Combine(Path.GetTempPath(), "qookil-diag.log");
+    private static string? _path;
+
+    private static string LogPath => _path ??= Path.Combine(WritablePaths.TempDir, "qookil-diag.log");
 
     public static string LogFilePath => LogPath;
 
