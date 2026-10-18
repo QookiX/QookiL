@@ -49,3 +49,29 @@ public sealed class TransferLogView
         FullPath = e.FullPath,
     };
 }
+
+/// <summary>进行中传输的展示模型（进度行）。</summary>
+public sealed class TransferProgressView
+{
+    public required Guid Id { get; init; }
+    public required string Glyph { get; init; }
+    public required SolidColorBrush BadgeBrush { get; init; }
+    public required string Name { get; init; }
+    public required double Percent { get; init; }
+    public required string PctText { get; init; }
+    public required string SizeText { get; init; }
+
+    public static TransferProgressView From(TransferProgress p) => new()
+    {
+        Id = p.Id,
+        Glyph = p.Kind == "上传" ? "\uE896" : "\uE898",
+        BadgeBrush = new SolidColorBrush(
+            p.Kind == "上传" ? Microsoft.UI.Colors.DodgerBlue : Microsoft.UI.Colors.SeaGreen),
+        Name = p.Name,
+        Percent = p.Percent,
+        PctText = p.Total > 0 ? $"{p.Percent:0}%" : "",
+        SizeText = p.Total > 0
+            ? $"{FileSizeFormat.Human(p.Done)} / {FileSizeFormat.Human(p.Total)}"
+            : FileSizeFormat.Human(p.Done),
+    };
+}

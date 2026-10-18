@@ -45,12 +45,17 @@ foreach (var name in photoNames)
 }
 
 var logEntries = new System.Collections.Concurrent.ConcurrentQueue<TransferLogEntry>();
+var progressEvents = new System.Collections.Concurrent.ConcurrentQueue<TransferProgress>();
 
 await using var server = ShareWebServer.Start(port, store, uploadDir, "SMOKE-TEST");
 server.TransferLogged += e =>
 {
     logEntries.Enqueue(e);
     Console.WriteLine($"[log] {e.Time:HH:mm:ss} {e.Kind} {e.Name} {e.Bytes}B from {e.Ip} path={e.FullPath}");
+};
+server.TransferProgressChanged += p =>
+{
+    progressEvents.Enqueue(p);
 };
 
 if (hold)
@@ -227,6 +232,16 @@ await Check("传输记录含完整路径（供「打开所在文件夹」）", (
     var dlOk = logEntries.Any(e => e.Kind == "下载" && e.FullPath == testFile);
     var upOk = logEntries.Any(e => e.Kind == "上传" && e.FullPath == uploadPath);
     return Task.FromResult(dlOk && upOk);
+});
+
+await Check("传输进度事件（电脑端进度条数据源）", () =>
+{
+    var dlStart = progressEvents.Any(p => p.Kind == "下载" && p.Done == 0 && !p.Finished);
+    var dlDone = progressEvents.Any(p => p.Kind == "下载" && p.Finished && p.Done > 0 && p.Done == p.Total);
+    var upStart = progressEvents.Any(p => p.Kind == "上传" && p.Done == 0 && !p.Finished);
+    var upDone = progressEvents.Any(p => p.Kind == "上传" && p.Finished && p.Done == p.Total && p.Done > 0);
+    Console.WriteLine($"      dlStart={dlStart} dlDone={dlDone} upStart={upStart} upDone={upDone} total={progressEvents.Count}");
+    return Task.FromResult(dlStart && dlDone && upStart && upDone);
 });
 
 await Check("网卡地址排序（物理网卡在前，虚拟网卡在后）", async () =>

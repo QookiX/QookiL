@@ -255,6 +255,7 @@
                         <Grid RowSpacing="6">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Grid>
@@ -268,7 +269,46 @@
                                     <FontIcon Glyph="&#xE74D;" FontSize="13"/>
                                 </Button>
                             </Grid>
-                            <Grid Grid.Row="1">
+                            <ItemsControl x:Name="ActiveTransfers" Grid.Row="1" Margin="0,2,0,8" Visibility="Collapsed">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="local:TransferProgressView">
+                                            <Grid ColumnSpacing="10" Padding="2,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="28" Height="28" CornerRadius="7"
+                                                        Background="{x:Bind BadgeBrush}">
+                                                    <FontIcon Glyph="{x:Bind Glyph}" FontSize="12" Foreground="White"/>
+                                                </Border>
+                                                <Grid Grid.Column="1" VerticalAlignment="Center" RowSpacing="3">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition Height="Auto"/>
+                                                    </Grid.RowDefinitions>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{x:Bind Name}" FontSize="12" MaxLines="1"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Grid.Column="1" Text="{x:Bind PctText}" FontSize="11"
+                                                                   VerticalAlignment="Center" Margin="8,0,0,0"
+                                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                                    </Grid>
+                                                    <ProgressBar Grid.Row="1" Value="{x:Bind Percent}" Maximum="100"
+                                                                 Height="4" HorizontalAlignment="Stretch"/>
+                                                </Grid>
+                                                <TextBlock Grid.Column="2" Text="{x:Bind SizeText}" FontSize="10.5"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            <Grid Grid.Row="2">
                                 <ListView x:Name="LogList" SelectionMode="None"
                                           IsItemClickEnabled="True" ItemClick="OnLogItemClick">
                                     <ListView.ItemTemplate>

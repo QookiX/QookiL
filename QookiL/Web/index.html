@@ -194,6 +194,16 @@ footer { margin-top: 130px; padding: 0 var(--margin) calc(env(safe-area-inset-bo
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* 下载进度条（页面内，超过阈值走浏览器原生下载） */
+#dlprog {
+  position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%);
+  width: min(86vw, 420px); background: var(--surface-2);
+  border-radius: var(--radius); padding: 12px 16px; z-index: 95;
+}
+#dlprog .dl-top { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-bottom: 8px; }
+#dlprog .dl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dlprog .dl-pct { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+
 .modal { position: fixed; inset: 0; z-index: 80; background: rgba(12, 6, 3, .93); display: none; align-items: center; justify-content: center; }
 .modal.on { display: flex; }
 .mclose {
@@ -301,6 +311,10 @@ window.setTimeout(function () {
 </footer>
 
 <div class="toast" id="toast" role="status"></div>
+<div id="dlprog" hidden>
+  <div class="dl-top"><span class="dl-name" id="dlname"></span><span class="dl-pct" id="dlpct">0%</span></div>
+  <div class="track"><div class="fill" id="dlbar"></div></div>
+</div>
 <div class="modal" id="modal">
   <button class="mclose" id="mclose" aria-label="关闭预览">
     <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 2l12 12M14 2L2 14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -378,7 +392,7 @@ function rowHtml(e, delay) {
          <button class="go" data-act="dl" title="下载" aria-label="下载">${IC.down}</button></span>`;
   return `<div class="row reveal in" role="button" tabindex="0" style="animation-delay:${delay}ms"
       data-id="${e.id || ""}" data-path="${esc(e._full || "")}"
-      data-kind="${e.kind}" data-name="${esc(e.name)}">
+      data-kind="${e.kind}" data-name="${esc(e.name)}" data-size="${e.size ?? ""}">
     <span class="thumb">${thumb}${badge}</span>
     <span class="mcol"><span class="nm">${esc(e.name)}</span><span class="meta">${meta}</span></span>
     ${side}</div>`;
@@ -548,6 +562,54 @@ async function poll() {
 }
 
 /* ================= 交互 ================= */
+
+/* 下载：页面内显示进度；超大文件或并发时交给浏览器原生下载（系统下载栏有进度） */
+let dlBusy = false;
+const DL_INPAGE_LIMIT = 300 * 1024 * 1024;
+
+function downloadFile(id, path, name, sizeText) {
+  const raw = Number(sizeText);
+  if (!Number.isFinite(raw) || raw > DL_INPAGE_LIMIT || dlBusy) {
+    location.href = dlUrl(id, path);
+    return;
+  }
+  dlBusy = true;
+  const panel = $("#dlprog");
+  $("#dlname").textContent = name;
+  $("#dlpct").textContent = "0%";
+  $("#dlbar").style.width = "0%";
+  panel.hidden = false;
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("GET", dlUrl(id, path));
+  xhr.responseType = "blob";
+  xhr.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const p = Math.round(e.loaded / e.total * 100);
+    $("#dlpct").textContent = p + "%";
+    $("#dlbar").style.width = p + "%";
+  };
+  xhr.onload = () => {
+    dlBusy = false; panel.hidden = true;
+    if (xhr.status !== 200) { toast("下载失败"); return; }
+    try {
+      const url = URL.createObjectURL(xhr.response);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      toast("已保存 " + name);
+    } catch (err) {
+      location.href = dlUrl(id, path); // 该环境不支持 blob 保存时回退原生下载
+    }
+  };
+  xhr.onerror = () => { dlBusy = false; panel.hidden = true; toast("下载失败"); };
+  xhr.send();
+}
+
 $("#list").addEventListener("click", ev => {
   const go = ev.target.closest(".go");
   const row = ev.target.closest(".row");
@@ -555,11 +617,11 @@ $("#list").addEventListener("click", ev => {
   const id = row.dataset.id || (cur && cur.id);
   const path = row.dataset.path || "";
   const name = row.dataset.name || "";
-  if (go) { location.href = dlUrl(id, path); return; }
+  if (go) { downloadFile(id, path, name, row.dataset.size); return; }
   if (row.dataset.kind === "dir") { openDir(id, path); return; }
   const mk = mediaKind(name);
   if (mk) view(id, path, mk, name);
-  else location.href = dlUrl(id, path);
+  else downloadFile(id, path, name, row.dataset.size);
 });
 
 $("#list").addEventListener("keydown", ev => {

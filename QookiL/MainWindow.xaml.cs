@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window
     private readonly SharedStore _store = new();
     private readonly ObservableCollection<SharedItemView> _shares = new();
     private readonly ObservableCollection<TransferLogView> _logs = new();
+    private readonly ObservableCollection<TransferProgressView> _active = new();
     private readonly DispatcherQueue _dispatcher;
     private readonly DispatcherQueueTimer _infoTimer;
 
@@ -67,6 +68,7 @@ public sealed partial class MainWindow : Window
 
         SharesList.ItemsSource = _shares;
         LogList.ItemsSource = _logs;
+        ActiveTransfers.ItemsSource = _active;
 
         // 恢复上次共享的文件（先恢复再设置开关，避免 Persist 把空列表写回设置）
         foreach (var path in _settings.SharedPaths.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -138,6 +140,7 @@ public sealed partial class MainWindow : Window
 
             var server = ShareWebServer.Start(port, _store, uploadDir, NetworkHelper.HostName);
             server.TransferLogged += OnTransferLogged;
+            server.TransferProgressChanged += OnTransferProgress;
             _server = server;
 
             _settings.Port = port;
@@ -604,6 +607,36 @@ public sealed partial class MainWindow : Window
                 UpdateEmptyHint();
                 Persist();
             }
+        });
+    }
+
+    /// <summary>进行中传输的进度（服务端按约 200ms 节流上报）。</summary>
+    private void OnTransferProgress(TransferProgress p)
+    {
+        _dispatcher.TryEnqueue(() =>
+        {
+            var index = -1;
+            for (var i = 0; i < _active.Count; i++)
+            {
+                if (_active[i].Id == p.Id) { index = i; break; }
+            }
+
+            if (p.Finished)
+            {
+                if (index >= 0) _active.RemoveAt(index);
+            }
+            else if (index >= 0)
+            {
+                _active[index] = TransferProgressView.From(p);
+            }
+            else
+            {
+                _active.Insert(0, TransferProgressView.From(p));
+                while (_active.Count > 20)
+                    _active.RemoveAt(_active.Count - 1);
+            }
+
+            ActiveTransfers.Visibility = _active.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         });
     }
 

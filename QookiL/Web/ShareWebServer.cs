@@ -15,6 +15,12 @@ namespace QookiL.Web;
 /// <summary>一次传输记录（下载 / 上传）。FullPath 供界面「打开所在文件夹」使用。</summary>
 public sealed record TransferLogEntry(DateTime Time, string Ip, string Kind, string Name, long Bytes, string FullPath = "");
 
+/// <summary>传输进度（进行中/已完成）。Id 用于界面按同一传输更新进度行。</summary>
+public sealed record TransferProgress(Guid Id, string Kind, string Name, string Ip, long Total, long Done, bool Finished)
+{
+    public double Percent => Total > 0 ? Math.Clamp(Done * 100.0 / Total, 0, 100) : (Finished ? 100 : 0);
+}
+
 /// <summary>
 /// 内嵌 Kestrel 网页服务器：局域网设备用浏览器打开 http://电脑IP:端口 即可
 /// 浏览/下载共享文件，也可以上传文件到接收文件夹。
@@ -32,6 +38,7 @@ public sealed class ShareWebServer : IAsyncDisposable
     public int Port { get; }
     public bool IsRunning => _app is not null;
     public event Action<TransferLogEntry>? TransferLogged;
+    public event Action<TransferProgress>? TransferProgressChanged;
 
     private ShareWebServer(int port) => Port = port;
 
@@ -134,7 +141,7 @@ public sealed class ShareWebServer : IAsyncDisposable
             }
         });
 
-        app.MapGet("/dl/{id}", (string id, string? path, string? disposition, HttpContext ctx) =>
+        app.MapGet("/dl/{id}", async (string id, string? path, string? disposition, HttpContext ctx) =>
         {
             if (!TryResolveRoot(store, uploadDir, id, out var root, out _))
                 return Results.NotFound(new { message = "共享不存在" });
@@ -151,11 +158,10 @@ public sealed class ShareWebServer : IAsyncDisposable
             ctx.Items["LogPath"] = full;
 
             // inline 用于浏览器内预览（图片/视频/音频），其余强制下载；
-            // 两者都启用 Range，大文件可断点续传、视频可拖动进度条
+            // 两者都支持 Range（大文件断点续传、视频拖进度条）
             var inline = string.Equals(disposition, "inline", StringComparison.OrdinalIgnoreCase);
-            return inline
-                ? Results.File(full, contentType, fileDownloadName: null, enableRangeProcessing: true)
-                : Results.File(full, contentType, fileName, enableRangeProcessing: true);
+            await StreamFileAsync(ctx, full, fileName, contentType, inline);
+            return Results.Empty;
         });
 
         app.MapPost("/upload", async (HttpContext ctx) =>
@@ -172,12 +178,49 @@ public sealed class ShareWebServer : IAsyncDisposable
             {
                 if (file.Length == 0) continue;
                 var target = UniquePath(Path.Combine(uploadDir, SanitizeFileName(file.FileName)));
-                await using var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 20, useAsync: true);
-                await file.CopyToAsync(fs, ctx.RequestAborted);
+                var name = Path.GetFileName(target);
+                var ip = ClientIp(ctx);
+                var transferId = Guid.NewGuid();
+                var expected = file.Length;
+                long done = 0;
+                var lastReport = DateTime.UtcNow;
+                var lastDone = 0L;
+
+                ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, 0, false));
+                try
+                {
+                    await using var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 1 << 16, useAsync: true);
+                    await using var src = file.OpenReadStream();
+                    var buffer = new byte[81920];
+                    while (true)
+                    {
+                        var read = await src.ReadAsync(buffer.AsMemory(), ctx.RequestAborted);
+                        if (read <= 0) break;
+                        await fs.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
+                        done += read;
+                        if (DateTime.UtcNow - lastReport >= TimeSpan.FromMilliseconds(200) ||
+                            done == expected || done - lastDone >= 4 * 1024 * 1024)
+                        {
+                            lastReport = DateTime.UtcNow;
+                            lastDone = done;
+                            ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, done, false));
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // 上传中断：保留已写入的部分文件，让用户决定去留
+                    throw;
+                }
+                finally
+                {
+                    ReportProgress(new TransferProgress(transferId, "上传", name, ip, expected, Math.Min(done, expected), true));
+                }
+
                 total += file.Length;
-                saved.Add(Path.GetFileName(target));
+                saved.Add(name);
                 System.Threading.Interlocked.Increment(ref _uploadsCount);
-                TransferLogged?.Invoke(new TransferLogEntry(DateTime.Now, ClientIp(ctx), "上传", Path.GetFileName(target), file.Length, target));
+                TransferLogged?.Invoke(new TransferLogEntry(DateTime.Now, ip, "上传", name, file.Length, target));
             }
 
             if (saved.Count == 0)
@@ -255,6 +298,115 @@ public sealed class ShareWebServer : IAsyncDisposable
         {
             var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
             if (!File.Exists(candidate)) return candidate;
+        }
+    }
+
+    private void ReportProgress(TransferProgress p)
+    {
+        try { TransferProgressChanged?.Invoke(p); }
+        catch { /* 进度回调失败不影响传输 */ }
+    }
+
+    /// <summary>
+    /// 手动流式发送文件：支持 Range（206 / 416）、中文文件名编码，并按块上报进度。
+    /// （不用 Results.File：Kestrel 的 SendFile 会绕过响应流，统计不到已发送字节。）
+    /// </summary>
+    private async Task StreamFileAsync(HttpContext ctx, string full, string fileName, string contentType, bool inline)
+    {
+        var info = new FileInfo(full);
+        var total = info.Length;
+
+        long start = 0, end = total - 1;
+        var isRange = false;
+        var rangeHeader = ctx.Request.Headers.Range.ToString();
+        if (!string.IsNullOrEmpty(rangeHeader) && rangeHeader.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase))
+        {
+            var spec = rangeHeader[6..].Split(',')[0].Trim(); // 多范围只处理第一段
+            var dash = spec.IndexOf('-');
+            if (dash >= 0)
+            {
+                var startText = spec[..dash].Trim();
+                var endText = spec[(dash + 1)..].Trim();
+                if (startText.Length == 0 && long.TryParse(endText, out var suffix) && suffix > 0)
+                {
+                    // 后缀范围：最后 N 字节
+                    start = Math.Max(0, total - suffix);
+                    end = total - 1;
+                }
+                else if (long.TryParse(startText, out var s2))
+                {
+                    start = s2;
+                    end = long.TryParse(endText, out var e2) && e2 < total ? e2 : total - 1;
+                }
+                if (start >= 0 && start < total && start <= end) isRange = true;
+                else { start = 0; end = total - 1; isRange = false; }
+            }
+        }
+
+        if (isRange && start >= total)
+        {
+            ctx.Response.StatusCode = 416;
+            ctx.Response.Headers["Content-Range"] = $"bytes */{total}";
+            return;
+        }
+
+        var length = isRange ? end - start + 1 : total;
+        ctx.Response.ContentType = contentType;
+        ctx.Response.Headers["Accept-Ranges"] = "bytes";
+        if (!inline)
+        {
+            var cd = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("attachment");
+            cd.SetHttpFileName(fileName);
+            ctx.Response.Headers["Content-Disposition"] = cd.ToString();
+        }
+        if (isRange)
+        {
+            ctx.Response.StatusCode = 206;
+            ctx.Response.Headers["Content-Range"] = $"bytes {start}-{end}/{total}";
+        }
+        ctx.Response.ContentLength = length;
+
+        var ip = ClientIp(ctx);
+        var transferId = Guid.NewGuid();
+        ReportProgress(new TransferProgress(transferId, "下载", fileName, ip, length, 0, false));
+
+        var buffer = new byte[81920];
+        long sent = 0;
+        var lastReport = DateTime.UtcNow;
+        var lastSent = 0L;
+        try
+        {
+            await using var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, useAsync: true);
+            if (start > 0) fs.Seek(start, SeekOrigin.Begin);
+
+            while (sent < length)
+            {
+                var want = (int)Math.Min(buffer.Length, length - sent);
+                var read = await fs.ReadAsync(buffer.AsMemory(0, want), ctx.RequestAborted);
+                if (read <= 0) break;
+                await ctx.Response.Body.WriteAsync(buffer.AsMemory(0, read), ctx.RequestAborted);
+                sent += read;
+                if (DateTime.UtcNow - lastReport >= TimeSpan.FromMilliseconds(200) ||
+                    sent == length || sent - lastSent >= 4 * 1024 * 1024)
+                {
+                    lastReport = DateTime.UtcNow;
+                    lastSent = sent;
+                    ReportProgress(new TransferProgress(transferId, "下载", fileName, ip, length, sent, false));
+                }
+            }
+            await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+        }
+        catch (OperationCanceledException)
+        {
+            // 客户端取消（断网/关闭）：忽略
+        }
+        catch (IOException)
+        {
+            // 连接中断：忽略
+        }
+        finally
+        {
+            ReportProgress(new TransferProgress(transferId, "下载", fileName, ip, length, Math.Min(sent, length), true));
         }
     }
 }
