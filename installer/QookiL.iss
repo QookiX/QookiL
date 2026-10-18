@@ -30,20 +30,20 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
 
 [Languages]
-; 官方仓库的简体中文翻译；文件不存在时（如本地编译）回退英文
+; 官方仓库的简体中文翻译（语言名以 .isl 文件内部定义为准：ChineseSimplified）
 #if FileExists(AddBackslash(SourcePath) + "ChineseSimplified.isl")
-Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
+Name: "ChineseSimplified"; MessagesFile: "ChineseSimplified.isl"
 #endif
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-; 英文（默认语言文案，chinesesimplified 若存在会覆盖同名键）
+; 英文（默认语言文案，ChineseSimplified 若存在会覆盖同名键）
 english.CreateDesktopIcon=Create a &desktop shortcut
 english.AutoStartProgram=Start {#MyAppName} automatically at Windows startup
 english.LaunchProgram=Launch {#MyAppName}
-chinesesimplified.CreateDesktopIcon=创建桌面快捷方式(&D)
-chinesesimplified.AutoStartProgram=开机自动启动(&S)
-chinesesimplified.LaunchProgram=立即运行 {#MyAppName}
+ChineseSimplified.CreateDesktopIcon=创建桌面快捷方式(&D)
+ChineseSimplified.AutoStartProgram=开机自动启动(&S)
+ChineseSimplified.LaunchProgram=立即运行 {#MyAppName}
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"
