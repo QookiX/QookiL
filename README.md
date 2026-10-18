@@ -126,9 +126,10 @@ dotnet run --project tools/ServerSmoke -c Release -- 5199 hold   # 挂起服务�
 
 覆盖：首页 / 共享列表 / 子目录 / 图片内联（缩略图）/ 下载字节一致性 / Range 206 / 越界拦截 400 / 未知共享 404 / 上传落盘 / rev 版本号变化（实时刷新机制）/ 防火墙三态检查 / 网卡排序（虚拟网卡在后）/ 系统下载文件夹解析。
 
-## CI 自动构建
+## CI 自动构建与发布
 
-推送到 `main` 或提交 PR 时，[GitHub Actions](.github/workflows/ci.yml) 自动执行：还原 → Release x64 编译 → 17 项冒烟测试 → 自包含发布（win-x64）→ 构建产物上传为 Artifact（保留 14 天，在 Actions 页面下载）。也支持手动触发（workflow_dispatch）。
+- **推送 `main` / PR**：[GitHub Actions](.github/workflows/ci.yml) 自动执行 还原 → Release x64 编译 → 17 项冒烟测试 → 自包含发布 → 构建产物上传为 Artifact（保留 14 天，Actions 页面下载）；也支持手动触发
+- **推送 `v*` 标签**（如 `git tag v1.0.0 && git push origin v1.0.0`）：[release.yml](.github/workflows/release.yml) 自动构建 → 冒烟测试 → 打包 zip → **创建 GitHub Release** 并附上绿色版压缩包，在仓库 Releases 页面直接下载
 
 注意：CI 会把 `NuGet.config` 临时替换为 nuget.org 官方源（本地保留国内镜像配置，互不影响）。
 

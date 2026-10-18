@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: 构建并发布 Release（windows x64）
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET SDK 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # 与 ci.yml 相同：本地 NuGet.config 指向国内镜像，CI 运行器换回官方源
+      - name: 使用 nuget.org 官方源
+        shell: pwsh
+        run: |
+          @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          '@ | Set-Content -Path NuGet.config -Encoding UTF8
+
+      - name: 还原依赖
+        run: dotnet restore QookiL/QookiL.csproj -p:Platform=x64
+
+      - name: 冒烟测试（17 项，测试不过不发布）
+        run: dotnet run --project tools/ServerSmoke -c Release --nologo
+
+      - name: 发布自包含绿色版（win-x64）
+        run: dotnet publish QookiL/QookiL.csproj -c Release -r win-x64 -p:Platform=x64 --self-contained true --nologo -o publish
+
+      - name: 打包 zip
+        shell: pwsh
+        run: Compress-Archive -Path publish/* -DestinationPath "QookiL-win-x64.zip" -CompressionLevel Optimal
+
+      - name: 创建 Release 并上传附件
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create ${{ github.ref_name }} `
+            "QookiL-win-x64.zip" `
+            --title "QookiL ${{ github.ref_name }}" `
+            --generate-notes `
+            --notes "自包含绿色版（win-x64），目标机器无需安装任何运行时，解压后运行 QookiL.exe 即可。"
