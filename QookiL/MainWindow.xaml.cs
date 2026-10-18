@@ -654,28 +654,25 @@ public sealed partial class MainWindow : Window
             OpenInExplorer(v.Item.FullPath);
     }
 
-    /// <summary>用资源管理器打开：文件则打开所在文件夹并高亮，文件夹则直接打开。</summary>
+    /// <summary>
+    /// 在资源管理器中定位文件/文件夹。
+    /// 走 shell32 的 SHOpenFolderAndSelectItems（请求已有 shell 打开），不新起 explorer.exe——
+    /// 受限启动上下文里新起 explorer.exe 会初始化失败并弹「0xc0000142」，用户点了列表却没反应。
+    /// </summary>
     private void OpenInExplorer(string path)
     {
-        try
+        if (string.IsNullOrWhiteSpace(path)) return;
+        if (!File.Exists(path) && !Directory.Exists(path))
         {
-            if (File.Exists(path))
-            {
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
-            }
-            else if (Directory.Exists(path))
-            {
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
-            }
-            else
-            {
-                ShowInfo(InfoBarSeverity.Warning, "文件已不在磁盘上：" + path);
-            }
+            ShowInfo(InfoBarSeverity.Warning, "文件已不在磁盘上：" + path);
+            return;
         }
-        catch (Exception ex)
-        {
-            ShowInfo(InfoBarSeverity.Error, "打开文件夹失败：" + ex.Message);
-        }
+
+        var error = ShellOpen.Reveal(path);
+        if (error is null) return;
+
+        DiagLog.Write($"[open] 无法在资源管理器中定位：{path} -> {error}");
+        ShowInfo(InfoBarSeverity.Warning, $"无法打开所在文件夹（{error}）。路径：{path}");
     }
 
     private void OnClearLog(object sender, RoutedEventArgs e)
