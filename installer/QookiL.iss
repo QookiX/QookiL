@@ -30,10 +30,8 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
 
 [Languages]
-; 官方仓库的简体中文翻译（语言名以 .isl 文件内部定义为准：ChineseSimplified）
-#if FileExists(AddBackslash(SourcePath) + "ChineseSimplified.isl")
+; 简体中文（官方翻译，随仓库携带，语言名以 .isl 内部定义为准）
 Name: "ChineseSimplified"; MessagesFile: "ChineseSimplified.isl"
-#endif
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]

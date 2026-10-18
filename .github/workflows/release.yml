@@ -34,17 +34,6 @@ jobs:
           if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
           Add-Content $env:GITHUB_PATH ($iscc | Split-Path)
 
-      - name: 下载简体中文语言包（Inno Setup 官方翻译仓库）
-        shell: pwsh
-        run: |
-          $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
-          try {
-            Invoke-WebRequest -Uri $url -OutFile "installer\ChineseSimplified.isl" -UseBasicParsing -TimeoutSec 60
-            Write-Host "chinese language file downloaded"
-          } catch {
-            Write-Warning "下载失败，安装器将回退英文界面：$($_.Exception.Message)"
-          }
-
       # 与 ci.yml 相同：本地 NuGet.config 指向国内镜像，CI 运行器换回官方源
       - name: 使用 nuget.org 官方源
         shell: pwsh
