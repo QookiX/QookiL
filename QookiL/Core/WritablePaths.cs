@@ -14,6 +14,9 @@ public static class WritablePaths
     /// <summary>实际使用的临时目录（只探测一次，结果缓存）。</summary>
     public static string TempDir => _tempDir ??= Probe();
 
+    /// <summary>是否因为环境受限而回退到了备用目录（系统临时目录不可写）。</summary>
+    public static bool UsingFallback { get; private set; }
+
     private static string Probe()
     {
         var candidates = new List<string>
@@ -23,8 +26,9 @@ public static class WritablePaths
             Path.Combine(AppContext.BaseDirectory, "temp"),
         };
 
-        foreach (var dir in candidates)
+        for (var i = 0; i < candidates.Count; i++)
         {
+            var dir = candidates[i];
             if (string.IsNullOrWhiteSpace(dir)) continue;
             try
             {
@@ -32,6 +36,7 @@ public static class WritablePaths
                 var probe = Path.Combine(dir, "qookil-probe-" + Guid.NewGuid().ToString("N") + ".tmp");
                 File.WriteAllText(probe, "ok");
                 File.Delete(probe);
+                UsingFallback = i > 0; // 第一个候选（系统临时目录）就失败 => 环境受限
                 return dir;
             }
             catch

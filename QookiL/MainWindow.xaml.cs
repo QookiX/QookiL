@@ -88,8 +88,14 @@ public sealed partial class MainWindow : Window
             _root = root;
             root.Loaded += async (_, _) =>
             {
-                // 启动时确认防火墙放行（未放行/读不到状态都会弹窗引导，绝不静默跳过）。
-                // 动态放行模式下规则本就只在服务运行期间存在，启动时不检查、由启动服务时统一处理。
+                // 受限启动（沙箱/受限令牌）：写入「下载」、打开资源管理器都会被系统拒绝，提前说清楚
+                if (WritablePaths.UsingFallback)
+                {
+                    StatusSub.Text = "⚠ 受限启动：请从资源管理器双击 QookiL.exe 以获得完整功能";
+                    ShowInfo(InfoBarSeverity.Warning,
+                        "检测到受限启动：无法写入「下载」文件夹，打开资源管理器也可能被拒绝。" +
+                        "接收的文件会存到可写目录；建议关闭后从资源管理器双击 QookiL.exe 启动。");
+                }
                 if (!_settings.StrictFirewall) await EnsureFirewallAsync();
                 if (AutoStartToggle.IsOn && _server is null) await StartServerAsync();
             };
@@ -659,7 +665,7 @@ public sealed partial class MainWindow : Window
     /// 走 shell32 的 SHOpenFolderAndSelectItems（请求已有 shell 打开），不新起 explorer.exe——
     /// 受限启动上下文里新起 explorer.exe 会初始化失败并弹「0xc0000142」，用户点了列表却没反应。
     /// </summary>
-    private void OpenInExplorer(string path)
+    private async void OpenInExplorer(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
         if (!File.Exists(path) && !Directory.Exists(path))
@@ -672,7 +678,63 @@ public sealed partial class MainWindow : Window
         if (error is null) return;
 
         DiagLog.Write($"[open] 无法在资源管理器中定位：{path} -> {error}");
-        ShowInfo(InfoBarSeverity.Warning, $"无法打开所在文件夹（{error}）。路径：{path}");
+        await ShowRevealFailedAsync(path, error);
+    }
+
+    /// <summary>
+    /// 定位失败时给出可复制的完整路径。
+    /// 受限启动上下文（沙箱/受限终端）里系统会拒绝打开资源管理器（E_ACCESSDENIED），
+    /// 这时复制路径让用户自己去地址栏粘贴是最实用的兜底。
+    /// </summary>
+    private async Task ShowRevealFailedAsync(string path, string error)
+    {
+        try
+        {
+            var box = new TextBox
+            {
+                Text = path,
+                IsReadOnly = true,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+            };
+            var panel = new StackPanel { Spacing = 10 };
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"系统拒绝了资源管理器调用（{error}）。常见原因是当前启动方式受限（沙箱/受限终端）。" +
+                       "从资源管理器双击 QookiL.exe 启动，即可正常打开文件夹。",
+                TextWrapping = TextWrapping.Wrap,
+            });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "文件完整路径（复制后粘贴到资源管理器地址栏）：",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            panel.Children.Add(box);
+
+            var dialog = new ContentDialog
+            {
+                Title = "无法打开所在文件夹",
+                Content = panel,
+                PrimaryButtonText = "复制路径",
+                CloseButtonText = "关闭",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = _root?.XamlRoot,
+            };
+            if (dialog.XamlRoot is null) return;
+
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                var data = new DataPackage();
+                data.SetText(path);
+                Clipboard.SetContent(data);
+                ShowInfo(InfoBarSeverity.Success, "路径已复制到剪贴板");
+            }
+        }
+        catch
+        {
+            ShowInfo(InfoBarSeverity.Warning, $"无法打开所在文件夹（{error}）。路径：{path}");
+        }
     }
 
     private void OnClearLog(object sender, RoutedEventArgs e)
