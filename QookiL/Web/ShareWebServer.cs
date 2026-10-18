@@ -184,6 +184,14 @@ public sealed class ShareWebServer : IAsyncDisposable
                 DiagLog.Write("[upload] 客户端取消上传");
                 return Results.StatusCode(499);
             }
+            catch (UnauthorizedAccessException ex)
+            {
+                DiagLog.Write("[upload] 接收文件夹不可写：" + ex.Message);
+                return Results.Json(new
+                {
+                    message = $"接收文件夹不可写（{uploadDir}）：请在电脑端改选一个可写文件夹",
+                }, statusCode: 500);
+            }
             catch (Exception ex)
             {
                 DiagLog.Write("[upload] 上传失败：" + ex);

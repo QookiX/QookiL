@@ -38,6 +38,7 @@ public sealed partial class MainWindow : Window
     private bool _fwPromptShown;
     private Process? _fwWatchdog;
     private string _fwFlag = "";
+    private bool _uploadDirAutoFallback;
 
     public MainWindow()
     {
@@ -115,17 +116,13 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            // 接收文件夹：手动选过且仍然可用就沿用；否则回退到系统「下载」文件夹
-            var uploadDir = UploadDirBox.Text.Trim();
-            var usedFallback = false;
-            if (uploadDir.Length == 0 || !EnsureDir(uploadDir))
-            {
-                uploadDir = DefaultUploadDir();
-                if (!EnsureDir(uploadDir))
-                    throw new IOException($"接收文件夹不可用：{uploadDir}");
-                UploadDirBox.Text = uploadDir;
-                usedFallback = true;
-            }
+            // 接收文件夹：用户选择 → 系统「下载」→ 用户目录 → 程序目录，取第一个真正可写的
+            // （受限环境下「下载」可能不可写，此时自动回退并在提示条说明实际位置）
+            var (uploadDir, uploadFallback, uploadNote) = UploadDirs.Resolve(UploadDirBox.Text);
+            if (!UploadDirs.EnsureWritable(uploadDir))
+                throw new IOException($"接收文件夹不可用：{uploadDir}");
+            UploadDirBox.Text = uploadDir;
+            _uploadDirAutoFallback = uploadFallback;
 
             // 先确认防火墙放行，否则局域网设备根本连不上
             // 动态放行模式：提权看门狗加规则并监视，服务停止/程序退出时自动撤销
@@ -154,9 +151,7 @@ public sealed partial class MainWindow : Window
             PortBox.IsEnabled = false;
             RefreshUrls();
 
-            var note = usedFallback
-                ? "（原接收文件夹不可访问，已改用系统「下载」文件夹）"
-                : "";
+            var note = uploadNote;
             if (fwOk)
                 ShowInfo(InfoBarSeverity.Success,
                     $"服务已启动。手机等设备连接同一 Wi‑Fi，扫码或输入地址即可访问。{note}");
@@ -270,6 +265,9 @@ public sealed partial class MainWindow : Window
             ? "动态放行（规则仅在服务运行期间存在，停止或退出程序时自动撤销）"
             : "一次性持久规则（Windows 标准做法；程序退出后端口无监听，外部无法访问）");
         sb.Append("临时目录：").AppendLine(WritablePaths.TempDir);
+        var receiveDir = UploadDirBox.Text.Trim();
+        sb.Append("接收文件夹：").Append(receiveDir)
+          .AppendLine(UploadDirs.EnsureWritable(receiveDir) ? "（可写）" : "（不可写！请改选接收文件夹或检查权限）");
         sb.Append("防火墙：").AppendLine(fw.Details);
         sb.AppendLine();
         sb.AppendLine("本机地址（扫码优先使用排在前面的物理网卡）：");
@@ -588,6 +586,7 @@ public sealed partial class MainWindow : Window
         var folder = await picker.PickSingleFolderAsync();
         if (folder is null) return;
         UploadDirBox.Text = folder.Path;
+        _uploadDirAutoFallback = false; // 用户手动选择，覆盖自动回退
         Persist();
     }
 
@@ -693,9 +692,11 @@ public sealed partial class MainWindow : Window
     {
         _settings.Port = (int)Math.Clamp(PortBox.Value, 1, 65535);
         // 等于默认值（系统「下载」文件夹）时不保存，下次启动重新解析，
-        // 这样用户以后再移动「下载」文件夹，程序会自动跟随
+        // 这样用户以后再移动「下载」文件夹，程序会自动跟随；
+        // 自动回退出来的临时目录同样不保存，避免环境恢复后仍停在回退位置
         var upload = UploadDirBox.Text.Trim();
-        _settings.UploadDir = string.Equals(upload, DefaultUploadDir(), StringComparison.OrdinalIgnoreCase)
+        _settings.UploadDir = (_uploadDirAutoFallback ||
+            string.Equals(upload, DefaultUploadDir(), StringComparison.OrdinalIgnoreCase))
             ? ""
             : upload;
         _settings.AutoStart = AutoStartToggle.IsOn;
@@ -731,18 +732,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>目录可用（存在或可创建）。</summary>
-    private static bool EnsureDir(string path)
-    {
-        try
-        {
-            Directory.CreateDirectory(path);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool EnsureDir(string path) => UploadDirs.EnsureWritable(path);
 
     private void LoadLogo()
     {

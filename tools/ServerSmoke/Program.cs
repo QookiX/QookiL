@@ -287,6 +287,20 @@ await Check("系统下载文件夹解析（跟随重定向）", async () =>
     return !string.IsNullOrEmpty(dl) && Directory.Exists(dl);
 });
 
+await Check("接收目录解析（不可写时自动回退到可写目录）", () =>
+{
+    // 传一个「文件」当目录：必然不可写，必须回退到真正能写的目录
+    var (dir, fallback, note) = UploadDirs.Resolve(testFile);
+    var writable = UploadDirs.EnsureWritable(dir);
+    Console.WriteLine($"      requested=<file> -> {dir} fallback={fallback} writable={writable} {note}");
+
+    var (dir2, _, _) = UploadDirs.Resolve(null);
+    var writable2 = UploadDirs.EnsureWritable(dir2);
+    Console.WriteLine($"      requested=null   -> {dir2} writable={writable2}");
+
+    return Task.FromResult(fallback && writable && writable2);
+});
+
 await server.DisposeAsync();
 
 Console.WriteLine();
