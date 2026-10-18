@@ -19,6 +19,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- 与 Release 标签保持一致：安装器读取 exe 版本号显示 -->
+    <Version>1.0.2</Version>
   </PropertyGroup>
 
   <ItemGroup>

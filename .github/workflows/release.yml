@@ -51,7 +51,7 @@ jobs:
       - name: 还原依赖
         run: dotnet restore QookiL/QookiL.csproj -p:Platform=x64
 
-      - name: 冒烟测试（17 项，测试不过不发布）
+      - name: 冒烟测试（测试不过不发布）
         run: dotnet run --project tools/ServerSmoke -c Release --nologo
 
       - name: 发布自包含绿色版（win-x64）
