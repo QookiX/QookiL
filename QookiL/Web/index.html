@@ -170,7 +170,14 @@ a { color: inherit; }
 }
 .send-btn:active { transform: translateY(1px); filter: brightness(1.08); }
 .send-note { margin-top: 20px; font-size: 16px; color: var(--muted); line-height: 1.65; max-width: 34em; }
-.prog { margin-top: 26px; max-width: 34em; }
+/* 上传进度：悬浮在视口底部，无论页面滚到哪里都能看到 */
+.prog {
+  position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translateX(-50%); width: min(92vw, 560px); margin: 0;
+  padding: 14px 16px; background: var(--surface-2); border-radius: var(--radius);
+  z-index: 94; animation: progIn .18s ease-out;
+}
+@keyframes progIn { from { opacity: 0; } to { opacity: 1; } }
 .track { height: 10px; background: var(--field); border-radius: var(--radius); overflow: hidden; }
 .fill { height: 100%; width: 0%; background: var(--accent); border-radius: var(--radius); transition: width .2s linear; }
 .ptext { margin-top: 10px; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -298,7 +305,7 @@ window.setTimeout(function () {
   <section class="send" id="send">
     <p class="send-line reveal">把手机里的文件<br>直接<button class="send-btn" id="pickSend">发到电脑</button></p>
     <p class="send-note reveal">文件会存进电脑的接收文件夹；同名文件会自动改名，不会覆盖任何东西。</p>
-    <div class="prog reveal" id="prog" hidden>
+    <div class="prog" id="prog" hidden>
       <div class="track"><div class="fill" id="fill"></div></div>
       <p class="ptext" id="ptext">正在发送…</p>
     </div>
