@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
@@ -510,7 +511,54 @@ public sealed partial class MainWindow : Window
             while (_logs.Count > 300)
                 _logs.RemoveAt(_logs.Count - 1);
             LogEmptyHint.Visibility = _logs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // 手机上传的文件同时进入共享列表（带「手机上传」标记，双击可定位文件）
+            if (entry.Kind == "上传" && File.Exists(entry.FullPath) &&
+                SharedItem.FromPath(entry.FullPath) is { } item && _store.Add(item))
+            {
+                _shares.Insert(0, SharedItemView.From(item, received: true));
+                UpdateEmptyHint();
+                Persist();
+            }
         });
+    }
+
+    /// <summary>传输记录单击：打开所在文件夹并选中该文件。</summary>
+    private void OnLogItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is TransferLogView v && !string.IsNullOrEmpty(v.FullPath))
+            OpenInExplorer(v.FullPath);
+    }
+
+    /// <summary>共享列表双击：在资源管理器中定位。</summary>
+    private void OnSharesDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is SharedItemView v)
+            OpenInExplorer(v.Item.FullPath);
+    }
+
+    /// <summary>用资源管理器打开：文件则打开所在文件夹并高亮，文件夹则直接打开。</summary>
+    private void OpenInExplorer(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            }
+            else if (Directory.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"") { UseShellExecute = true });
+            }
+            else
+            {
+                ShowInfo(InfoBarSeverity.Warning, "文件已不在磁盘上：" + path);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(InfoBarSeverity.Error, "打开文件夹失败：" + ex.Message);
+        }
     }
 
     private void OnClearLog(object sender, RoutedEventArgs e)

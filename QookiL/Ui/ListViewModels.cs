@@ -11,15 +11,19 @@ public sealed class SharedItemView
     public required string Title { get; init; }
     public required string Meta { get; init; }
     public required string IconGlyph { get; init; }
+    public bool Received { get; init; }
 
-    public static SharedItemView From(SharedItem item) => new()
+    public static SharedItemView From(SharedItem item, bool received = false) => new()
     {
         Item = item,
         Title = item.Name,
-        Meta = item.IsFolder
-            ? "文件夹 · " + item.FullPath
-            : FileSizeFormat.Human(item.SizeBytes) + " · " + item.FullPath,
+        Meta = received
+            ? "手机上传 · " + FileSizeFormat.Human(item.SizeBytes) + " · " + item.FullPath
+            : item.IsFolder
+                ? "文件夹 · " + item.FullPath
+                : FileSizeFormat.Human(item.SizeBytes) + " · " + item.FullPath,
         IconGlyph = item.IsFolder ? "\uE8B7" : "\uE7C3",
+        Received = received,
     };
 }
 
@@ -31,14 +35,17 @@ public sealed class TransferLogView
     public required string Name { get; init; }
     public required string Sub { get; init; }
     public required string Size { get; init; }
+    public required string FullPath { get; init; }
 
     public static TransferLogView From(TransferLogEntry e) => new()
     {
-        Glyph = e.Kind == "上传" ? "\uE898" : "\uE896",
+        // E896 上箭头（上传）、E898 下箭头（下载）
+        Glyph = e.Kind == "上传" ? "\uE896" : "\uE898",
         BadgeBrush = new SolidColorBrush(
             e.Kind == "上传" ? Microsoft.UI.Colors.DodgerBlue : Microsoft.UI.Colors.SeaGreen),
         Name = e.Name,
         Sub = e.Time.ToString("HH:mm:ss") + "  ·  " + e.Ip,
         Size = e.Bytes > 0 ? FileSizeFormat.Human(e.Bytes) : "",
+        FullPath = e.FullPath,
     };
 }

@@ -12,8 +12,8 @@ using Microsoft.Extensions.Hosting;
 
 namespace QookiL.Web;
 
-/// <summary>一次传输记录（下载 / 上传）。</summary>
-public sealed record TransferLogEntry(DateTime Time, string Ip, string Kind, string Name, long Bytes);
+/// <summary>一次传输记录（下载 / 上传）。FullPath 供界面「打开所在文件夹」使用。</summary>
+public sealed record TransferLogEntry(DateTime Time, string Ip, string Kind, string Name, long Bytes, string FullPath = "");
 
 /// <summary>
 /// 内嵌 Kestrel 网页服务器：局域网设备用浏览器打开 http://电脑IP:端口 即可
@@ -70,9 +70,10 @@ public sealed class ShareWebServer : IAsyncDisposable
                     ctx.Response.StatusCode is 200 or 206 &&
                     ctx.Items.TryGetValue("LogName", out var name))
                 {
+                    var fullPath = ctx.Items.TryGetValue("LogPath", out var p) ? p?.ToString() ?? "" : "";
                     TransferLogged?.Invoke(new TransferLogEntry(
                         DateTime.Now, ClientIp(ctx), "下载",
-                        name?.ToString() ?? "", ctx.Response.ContentLength ?? 0));
+                        name?.ToString() ?? "", ctx.Response.ContentLength ?? 0, fullPath));
                 }
             }
             catch
@@ -147,6 +148,7 @@ public sealed class ShareWebServer : IAsyncDisposable
 
             var fileName = Path.GetFileName(full);
             ctx.Items["LogName"] = fileName;
+            ctx.Items["LogPath"] = full;
 
             // inline 用于浏览器内预览（图片/视频/音频），其余强制下载；
             // 两者都启用 Range，大文件可断点续传、视频可拖动进度条
@@ -175,7 +177,7 @@ public sealed class ShareWebServer : IAsyncDisposable
                 total += file.Length;
                 saved.Add(Path.GetFileName(target));
                 System.Threading.Interlocked.Increment(ref _uploadsCount);
-                TransferLogged?.Invoke(new TransferLogEntry(DateTime.Now, ClientIp(ctx), "上传", Path.GetFileName(target), file.Length));
+                TransferLogged?.Invoke(new TransferLogEntry(DateTime.Now, ClientIp(ctx), "上传", Path.GetFileName(target), file.Length, target));
             }
 
             if (saved.Count == 0)

@@ -44,9 +44,14 @@ foreach (var name in photoNames)
     if (img is not null) store.Add(img);
 }
 
+var logEntries = new System.Collections.Concurrent.ConcurrentQueue<TransferLogEntry>();
+
 await using var server = ShareWebServer.Start(port, store, uploadDir, "SMOKE-TEST");
 server.TransferLogged += e =>
-    Console.WriteLine($"[log] {e.Time:HH:mm:ss} {e.Kind} {e.Name} {e.Bytes}B from {e.Ip}");
+{
+    logEntries.Enqueue(e);
+    Console.WriteLine($"[log] {e.Time:HH:mm:ss} {e.Kind} {e.Name} {e.Bytes}B from {e.Ip} path={e.FullPath}");
+};
 
 if (hold)
 {
@@ -201,6 +206,14 @@ await Check("防火墙状态检查（三态读取，含诊断信息）", async (
     var info = await Task.Run(() => FirewallHelper.Check(self));
     Console.WriteLine($"      verdict={info.Verdict}; {info.Details}");
     return !string.IsNullOrWhiteSpace(info.Details);
+});
+
+await Check("传输记录含完整路径（供「打开所在文件夹」）", () =>
+{
+    var uploadPath = Path.Combine(uploadDir, "手机上传 测试.txt");
+    var dlOk = logEntries.Any(e => e.Kind == "下载" && e.FullPath == testFile);
+    var upOk = logEntries.Any(e => e.Kind == "上传" && e.FullPath == uploadPath);
+    return Task.FromResult(dlOk && upOk);
 });
 
 await Check("网卡地址排序（物理网卡在前，虚拟网卡在后）", async () =>

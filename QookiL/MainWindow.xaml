@@ -152,7 +152,8 @@
                         <Grid Grid.Row="1" Margin="8,0,8,4">
                             <ListView x:Name="SharesList" SelectionMode="Extended" AllowDrop="True"
                                       Background="Transparent" BorderThickness="0"
-                                      DragOver="OnListDragOver" Drop="OnListDrop" KeyDown="SharesList_KeyDown">
+                                      DragOver="OnListDragOver" Drop="OnListDrop" KeyDown="SharesList_KeyDown"
+                                      DoubleTapped="OnSharesDoubleTapped">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="local:SharedItemView">
                                         <Grid ColumnSpacing="12" Padding="6,8">
@@ -259,10 +260,12 @@
                                 </Button>
                             </Grid>
                             <Grid Grid.Row="1">
-                                <ListView x:Name="LogList" SelectionMode="None">
+                                <ListView x:Name="LogList" SelectionMode="None"
+                                          IsItemClickEnabled="True" ItemClick="OnLogItemClick">
                                     <ListView.ItemTemplate>
                                         <DataTemplate x:DataType="local:TransferLogView">
-                                            <Grid ColumnSpacing="10" Padding="2,6">
+                                            <Grid ColumnSpacing="10" Padding="2,6"
+                                                  ToolTipService.ToolTip="点击打开所在文件夹">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
